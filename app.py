@@ -1,19 +1,20 @@
-from agno.agent import Agent
+from agno.agent import Agent, RunResponse
 from agno.models.google import Gemini
-from agno.models.groq import Groq
 from agno.tools.sql import SQLTools
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 from datetime import datetime
+import streamlit as st
+import time
+from typing import Optional, List
+import base64
 import os
 
 data_atual = datetime.now().date()
 
 load_dotenv()
 
-# os.environ['GEMINI_API_KEY'] = os.getenv('GEMINI_API_KEY')
-
-instructions = f"""
+instructions = '''
 # System Message - Assistente Financeiro SQLite
 
 **Identificação**: Sempre se apresente como "🤖 economiza.ai: [seu conteúdo]"
@@ -139,20 +140,247 @@ WHERE Tipo = 'Passivo' AND strftime('%Y-%m', Data) = strftime('%Y-%m', 'now');
 
 O objetivo é proporcionar uma experiência de gestão financeira intuitiva, automatizada e inteligente através de linguagem natural.
 """
+'''
 
-path = os.environ.get('DATABASE_FILE', 'gastos_receita.db')
+gemini_api = os.getenv('GEMINI_API_KEY')
 
-engine = create_engine(f'sqlite:///./{path}')
+engine = create_engine('sqlite:///./gastos_receita.db')
 
-agent = Agent(
-    name="economiza.ai",
-    model=Groq(id='llama-3.3-70b-versatile'),
+agente = Agent(
+    model=Gemini(id='gemini-2.0-flash-001', api_key=gemini_api),
+    add_history_to_messages=True,
+    markdown=False,
     show_tool_calls=True,
-    markdown=True,
-    tools=[SQLTools(db_engine=engine)],
     retries=3,
     system_message=instructions,
-    add_history_to_messages=True
+    tools=[SQLTools(db_engine=engine)],
+    store_events=True
 )
 
-agent.print_response(f'Me retorne o gasto com comida nas ultimas 3 semanas.', stream=True)
+
+# Config
+st.set_page_config(page_icon='🤖', page_title=' economiza.ai', layout="wide")
+
+# Inicializar estados
+def init_session_state():
+    """Inicializa os estados da sessão com cache management"""
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "uploaded_images" not in st.session_state:
+        st.session_state.uploaded_images = []
+    if "audio_processed" not in st.session_state:
+        st.session_state.audio_processed = set()
+
+@st.cache_data
+def process_image(file_bytes: bytes, filename: str) -> dict:
+    """Processa e cacheia imagens PNG"""
+    return {
+        "name": filename,
+        "data": base64.b64encode(file_bytes).decode(),
+        "size": len(file_bytes)
+    }
+
+def render_message(message: dict):
+    """Renderiza uma mensagem no chat"""
+    with st.chat_message(message["role"]):
+        if message["role"] == "assistant" and "query" in message:
+            st.caption(f"🔍 {message['query']}")
+        
+        st.write(message["content"])
+        
+        # Mostrar imagens anexadas se houver
+        if "images" in message:
+            cols = st.columns(min(len(message["images"]), 3))
+            for idx, img in enumerate(message["images"]):
+                with cols[idx % 3]:
+                    st.image(f"data:image/png;base64,{img['data']}", 
+                            caption=img['name'], 
+                            use_container_width=True)
+
+def simulate_streaming(content: str, placeholder):
+    """Simula streaming de texto para melhor UX"""
+    full_response = ""
+    chunk_size = 15
+    
+    for i in range(0, len(content), chunk_size):
+        chunk = content[i:i+chunk_size]
+        full_response += chunk
+        placeholder.write(full_response + "▌")
+        time.sleep(0.03)
+    
+    placeholder.write(full_response)
+    return full_response
+
+# Estados iniciais
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "media_cache" not in st.session_state:
+    st.session_state.media_cache = []
+
+# Funções auxiliares
+@st.cache_data
+def process_media(data: bytes, filename: str, media_type: str) -> dict:
+    """Processa e cacheia mídia"""
+    return {
+        "type": media_type,
+        "name": filename,
+        "data": base64.b64encode(data).decode(),
+        "timestamp": datetime.now().strftime("%H:%M")
+    }
+
+def render_message(msg: dict):
+    """Renderiza mensagem adaptada ao tipo de conteúdo"""
+    with st.chat_message(msg["role"]):
+        # Indicador de tipo de input
+        if msg.get("input_type") and msg["role"] == "user":
+            icon = {"text": "💬", "audio": "🎤", "camera": "📸", "file": "📎"}
+            st.caption(f"{icon.get(msg['input_type'], '💬')} via {msg['input_type']}")
+        
+        # Query do assistente
+        if msg["role"] == "assistant" and msg.get("query"):
+            st.caption(f"🔍 {msg['query']}")
+        
+        # Conteúdo principal
+        st.write(msg["content"])
+        
+        # Mídia anexada
+        if media := msg.get("media"):
+            cols = st.columns(min(len(media), 3))
+            for i, m in enumerate(media):
+                with cols[i % 3]:
+                    if m["type"] in ["camera", "file"]:
+                        st.image(f"data:image/png;base64,{m['data']}", 
+                                caption=f"{m['name']} - {m['timestamp']}")
+                    elif m["type"] == "audio":
+                        st.info(f"🎵 Áudio: {m['timestamp']}")
+
+def process_input(content: str, input_type: str, media: list = None):
+    """Processa input e gera resposta adaptada"""
+    # Mensagem do usuário
+    user_msg = {
+        "role": "user",
+        "content": content,
+        "input_type": input_type,
+        "media": media or []
+    }
+    st.session_state.messages.append(user_msg)
+    
+    # Resposta do assistente
+    with st.chat_message("assistant"):
+        try:
+            # Simular processamento baseado no tipo
+            response = agente.run(content)
+            
+            # Adaptar resposta ao tipo de input
+            prefix = {
+                "audio": "🎤 Transcrição processada: ",
+                "camera": "📸 Análise da imagem: ",
+                "file": "📎 Arquivo analisado: ",
+                "text": ""
+            }
+            
+            # Query e conteúdo
+            query = response.tools[0].tool_args.get('query', '') if hasattr(response, 'tools') and response.tools else ""
+            if query:
+                st.caption(f"🔍 {query}")
+            
+            # Streaming
+            content = prefix.get(input_type, "") + (response.content if hasattr(response, 'content') else str(response))
+            placeholder = st.empty()
+            full_text = ""
+            
+            for chunk in [content[i:i+20] for i in range(0, len(content), 20)]:
+                full_text += chunk
+                placeholder.write(full_text + "▌")
+                time.sleep(0.02)
+            
+            placeholder.write(full_text)
+            
+            # Salvar resposta
+            assistant_msg = {"role": "assistant", "content": full_text}
+            if query:
+                assistant_msg["query"] = query
+            st.session_state.messages.append(assistant_msg)
+            
+        except Exception as e:
+            st.error(f"❌ Erro: {e}")
+
+# Interface principal
+st.header('🤖 economiza.ai')
+st.subheader('Chat')
+
+# Tabs de input
+tab1, tab2, tab3, tab4 = st.tabs(["💬 Texto", "🎤 Áudio", "📸 Câmera", "📎 Arquivo"])
+
+with tab1:
+    if prompt := st.chat_input("Digite sua mensagem..."):
+        process_input(prompt, "text", st.session_state.media_cache)
+        st.session_state.media_cache = []
+        st.rerun()
+
+with tab2:
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        audio = st.audio_input("Gravar mensagem")
+    with col2:
+        st.write(' ')
+        st.write(' ')
+        if st.button("📤 Enviar", key="send_audio", disabled=not audio):
+            if audio:
+                # Simular transcrição
+                transcription = "Transcrição do áudio capturado"
+                media = [process_media(audio.read(), f"audio_{datetime.now().strftime('%H%M%S')}.wav", "audio")]
+                process_input(transcription, "audio", media)
+                st.rerun()
+
+with tab3:
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        enable = st.checkbox('Ative a câmera')
+        photo = st.camera_input("Tirar foto", disabled=not enable)
+    with col2:
+        st.write(' ')
+        st.write(' ')
+        if st.button("📤 Enviar", key="send_photo", disabled=not photo):
+            if photo:
+                media = [process_media(photo.read(), f"foto_{datetime.now().strftime('%H%M%S')}.png", "camera")]
+                process_input("Analisar esta imagem", "camera", media)
+                st.rerun()
+
+with tab4:
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        files = st.file_uploader("Anexar PNG", type=['png'], accept_multiple_files=True)
+        if files:
+            st.session_state.media_cache = [
+                process_media(f.read(), f.name, "file") for f in files
+            ]
+            st.info(f"📎 {len(files)} arquivo(s) anexado(s)")
+    with col2:
+        st.write(' ')
+        st.write(' ')
+        if st.button("📤 Enviar", key="send_files", disabled=not files):
+            if st.session_state.media_cache:
+                process_input(f"Analisar {len(st.session_state.media_cache)} arquivo(s)", "file")
+                st.rerun()
+
+# Chat container
+for msg in st.session_state.messages:
+    render_message(msg)
+
+# Preview de mídia anexada
+if st.session_state.media_cache:
+    with st.expander(f"📎 Mídia anexada ({len(st.session_state.media_cache)})"):
+        cols = st.columns(4)
+        for i, m in enumerate(st.session_state.media_cache):
+            with cols[i % 4]:
+                st.image(f"data:image/png;base64,{m['data']}", caption=m['name'])
+
+# Sidebar
+with st.sidebar:
+    st.metric("💬 Mensagens", len(st.session_state.messages))
+    st.metric("📎 Mídias", sum(len(m.get("media", [])) for m in st.session_state.messages))
+    
+    if st.button("🗑️ Limpar"):
+        st.session_state.clear()
+        st.rerun()
