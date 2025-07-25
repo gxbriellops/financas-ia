@@ -4,6 +4,7 @@ import base64
 import json
 
 def vision(pic_byte):
+    """Analisa imagem usando Groq Vision"""
     pic_base64 = base64.b64encode(pic_byte).decode('utf-8')
     img_data_url = f"data:image/png;base64,{pic_base64}"
 
@@ -18,7 +19,7 @@ def vision(pic_byte):
                 "content": [
                     {
                         "type": "text",
-                        "text": "What's in this image?"
+                        "text": "Você é um assistente especializado em análise de documentos financeiros. Analise esta imagem procurando por:\n\n1. VALORES MONETÁRIOS (preços, totais, subtotais)\n2. DESCRIÇÃO do produto/serviço\n3. DATA da transação (se visível)\n4. ESTABELECIMENTO/EMPRESA\n5. TIPO DE DOCUMENTO (nota fiscal, recibo, comprovante, etc)\n\nEXTRAIA e ORGANIZE essas informações de forma clara e estruturada. Se encontrar múltiplas transações, liste cada uma separadamente. Seja preciso com os valores e detalhes."
                     },
                     {
                         "type": "image_url",
@@ -39,6 +40,7 @@ def vision(pic_byte):
     return completion.choices[0].message
 
 def speetch_to_text(audio):
+    """Converte áudio em texto usando Groq Speech-to-Text"""
     groq_api = os.getenv('GROQ_API_KEY')
     client = Groq(api_key=groq_api)
 
@@ -48,10 +50,15 @@ def speetch_to_text(audio):
     transcription = client.audio.transcriptions.create(
         file=file_tuple,  # Passa como tupla (nome, bytes, tipo)
         model="whisper-large-v3-turbo",
-        prompt="Specify context or spelling",
+        prompt="Transcreva o áudio em português brasileiro, focando em informações sobre gastos, receitas ou transações financeiras.",
         response_format="verbose_json",
         timestamp_granularities=["word", "segment"],
         language="pt",
         temperature=0.0
     )
     return json.dumps(transcription, indent=2, default=str)
+
+# Função com nome correto para manter compatibilidade
+def speech_to_text(audio_path):
+    """Alias para speetch_to_text para compatibilidade"""
+    return speetch_to_text(audio_path)

@@ -9,9 +9,9 @@ import time
 from typing import Optional, List, Dict, Any
 import base64
 import os
-from helpers import vision, speech_to_text
+from helpers import vision, speetch_to_text
 import json
-import tempfile
+import re
 
 # Configuração inicial
 load_dotenv()
@@ -30,6 +30,15 @@ SYSTEM_INSTRUCTIONS = f'''
 **Identificação**: Sempre se apresente como "🤖 economiza.ai: [seu conteúdo]"
 
 Você é um assistente financeiro especializado em SQLite que gerencia automaticamente a tabela `receita_gastos` através de linguagem natural, executando operações de forma inteligente e proativa.
+
+**IMPORTANTE - PROCESSAMENTO DE IMAGENS**: Quando você receber alguma imagem de comprovante, nota fiscal, recibo, extrato bancário, maquineta etc, você deve AUTOMATICAMENTE:
+1. Analisar a imagem e extrair as informações financeiras (valor, descrição, data, etc)
+2. Inferir a categoria apropriada baseada no tipo de estabelecimento/produto
+3. Determinar se é receita (Ativo) ou gasto (Passivo)
+4. EXECUTAR automaticamente o INSERT na tabela sem pedir confirmação
+5. Confirmar o registro com uma mensagem amigável
+
+NÃO peça para o usuário especificar o que analisar - PROCESSE AUTOMATICAMENTE todas as informações financeiras da imagem.
 
 ## Estrutura da Tabela: `receita_gastos`
 
@@ -186,25 +195,26 @@ class MediaData:
         }
 
 class AudioProcessor:
-    """Processa áudio usando a função auxiliar speech_to_text"""
+    """Processa áudio usando a função auxiliar speetch_to_text"""
     @staticmethod
-    def process(audio_data: bytes) -> str:
+    def process(audio_file) -> str:
         """Processa áudio e retorna transcrição"""
         try:
-            # Salvar temporariamente o áudio
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                tmp_file.write(audio_data)
-                tmp_file_path = tmp_file.name
+            # Usar a função correta do helpers.py
+            audio_transcrito = speetch_to_text(audio=audio_file)
+            transcricao_dict = json.loads(audio_transcrito)
             
-            # Transcrever usando a função auxiliar
-            transcription_json = speech_to_text(tmp_file_path)
-            transcription_data = json.loads(transcription_json)
+            # Extrair texto usando regex como no teste.py
+            match = re.search(r'text=[\'"]([^\'"]+)[\'"]', str(transcricao_dict))
+            texto_extraido = match.group(1) if match else None
             
-            # Limpar arquivo temporário
-            os.unlink(tmp_file_path)
-            
-            # Extrair texto da transcrição
-            return transcription_data.get('text', 'Não foi possível transcrever o áudio')
+            if texto_extraido:
+                return texto_extraido
+            else:
+                # Tentar extrair diretamente do dict se for possível
+                if isinstance(transcricao_dict, dict) and 'text' in transcricao_dict:
+                    return transcricao_dict['text']
+                return 'Não foi possível transcrever o áudio'
         
         except Exception as e:
             st.error(f"Erro ao processar áudio: {e}")
@@ -213,16 +223,12 @@ class AudioProcessor:
 class ImageProcessor:
     """Processa imagens usando a função auxiliar vision"""
     @staticmethod
-    def process(image_data: str) -> str:
+    def process(image_bytes: bytes) -> str:
         """Processa imagem e retorna análise financeira"""
         try:
-            # Adicionar prefixo data URL se necessário
-            if not image_data.startswith('data:'):
-                image_data = f"data:image/png;base64,{image_data}"
-            
-            # Analisar usando a função auxiliar
-            vision_response = vision(image_data)
-            return vision_response.content
+            # Usar a função vision corretamente como no teste.py
+            vision_transcription = vision(pic_byte=image_bytes)
+            return vision_transcription.content
         
         except Exception as e:
             st.error(f"Erro ao processar imagem: {e}")
@@ -237,8 +243,6 @@ class SessionStateManager:
             st.session_state.messages = []
         if "media_cache" not in st.session_state:
             st.session_state.media_cache = []
-        if "processed_audio" not in st.session_state:
-            st.session_state.processed_audio = set()
 
 class MessageRenderer:
     """Renderiza mensagens no chat"""
@@ -311,16 +315,19 @@ class InputProcessor:
         if input_type == "audio":
             return content  # Já processado
         elif input_type == "camera" and media:
-            # Processar imagem e adicionar análise ao conteúdo
-            image_analysis = self.image_processor.process(media[0]["data"])
-            return f"{content}\n\nAnálise da imagem: {image_analysis}"
+            # Processar imagem e criar comando direto para análise e registro
+            image_bytes = base64.b64decode(media[0]["data"])
+            image_analysis = self.image_processor.process(image_bytes)
+            return f"PROCESSE AUTOMATICAMENTE esta imagem financeira e registre as informações encontradas:\n\nAnálise da imagem: {image_analysis}\n\nCom base nesta análise, extraia e registre automaticamente na tabela receita_gastos todas as informações financeiras identificadas (valor, descrição, categoria apropriada, tipo). Execute o INSERT sem pedir confirmação."
         elif input_type == "file" and media:
-            # Processar múltiplas imagens se necessário
+            # Processar múltiplas imagens e criar comando para registro automático
             analyses = []
             for m in media:
-                analysis = self.image_processor.process(m["data"])
+                image_bytes = base64.b64decode(m["data"])
+                analysis = self.image_processor.process(image_bytes)
                 analyses.append(f"- {m['name']}: {analysis}")
-            return f"{content}\n\nAnálises:\n" + "\n".join(analyses)
+            all_analyses = "\n".join(analyses)
+            return f"PROCESSE AUTOMATICAMENTE estas {len(media)} imagens financeiras e registre todas as informações encontradas:\n\nAnálises:\n{all_analyses}\n\nCom base nestas análises, extraia e registre automaticamente na tabela receita_gastos TODAS as informações financeiras identificadas em cada imagem (valores, descrições, categorias apropriadas, tipos). Execute os INSERTs sem pedir confirmação."
         return content
     
     def _generate_response(self, content: str, input_type: str):
@@ -424,22 +431,25 @@ def handle_audio_input(processor: InputProcessor):
     """Gerencia input de áudio"""
     col1, col2 = st.columns([3, 1])
     with col1:
-        audio = st.audio_input("Gravar mensagem de voz")
+        audio_data = st.audio_input("Gravar mensagem de voz")
     with col2:
         st.write(' ')
         st.write(' ')
-        if st.button("📤 Enviar Áudio", key="send_audio", disabled=not audio):
-            if audio:
-                # Processar áudio
-                audio_data = audio.read()
-                transcription = AudioProcessor.process(audio_data)
-                
-                # Criar objeto de mídia
-                media_data = MediaData(audio_data, f"audio_{datetime.now().strftime('%H%M%S')}.wav", "audio")
-                
-                # Processar com transcrição
-                processor.process(transcription, "audio", [media_data.to_dict()])
-                st.rerun()
+        if st.button("📤 Enviar Áudio", key="send_audio", disabled=not audio_data):
+            if audio_data:
+                try:
+                    # Processar áudio usando a função correta
+                    transcription = AudioProcessor.process(audio_data)
+                    
+                    # Criar objeto de mídia
+                    audio_bytes = audio_data.getvalue()
+                    media_data = MediaData(audio_bytes, f"audio_{datetime.now().strftime('%H%M%S')}.wav", "audio")
+                    
+                    # Processar com transcrição
+                    processor.process(transcription, "audio", [media_data.to_dict()])
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao processar áudio: {e}")
 
 def handle_camera_input(processor: InputProcessor):
     """Gerencia input de câmera"""
@@ -453,23 +463,23 @@ def handle_camera_input(processor: InputProcessor):
         if st.button("📤 Enviar Foto", key="send_photo", disabled=not photo):
             if photo:
                 # Criar objeto de mídia
-                photo_data = photo.read()
+                photo_data = photo.getvalue()
                 media_data = MediaData(photo_data, f"foto_{datetime.now().strftime('%H%M%S')}.png", "camera")
                 
-                # Processar
-                processor.process("Analisar informações financeiras desta imagem", "camera", [media_data.to_dict()])
+                # Processar automaticamente - sem texto genérico
+                processor.process("", "camera", [media_data.to_dict()])
                 st.rerun()
 
 def handle_file_input(processor: InputProcessor):
     """Gerencia input de arquivos"""
     col1, col2 = st.columns([3, 1])
     with col1:
-        files = st.file_uploader("Anexar imagens PNG", type=['png'], accept_multiple_files=True)
+        files = st.file_uploader("Anexar imagens", type=['png', 'jpeg', 'jpg'], accept_multiple_files=True)
         if files:
             # Processar arquivos
             media_list = []
             for file in files:
-                file_data = file.read()
+                file_data = file.getvalue()
                 media_data = MediaData(file_data, file.name, "file")
                 media_list.append(media_data.to_dict())
             
@@ -482,7 +492,7 @@ def handle_file_input(processor: InputProcessor):
         if st.button("📤 Enviar Arquivos", key="send_files", disabled=not files):
             if st.session_state.media_cache:
                 processor.process(
-                    f"Analisar informações financeiras em {len(st.session_state.media_cache)} arquivo(s)", 
+                    "", # String vazia - o processamento será feito automaticamente
                     "file"
                 )
                 st.rerun()
