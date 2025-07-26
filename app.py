@@ -10,6 +10,7 @@ import os
 from helpers import speetch_to_text
 import json
 import re
+from dashboard import carregar_dados
 
 # Configuração inicial
 load_dotenv()
@@ -22,6 +23,8 @@ DB_PATH = 'sqlite:///./gastos_receita.db'
 # Instruções do sistema
 SYSTEM_INSTRUCTIONS = f'''
 # System Message - Assistente Financeiro SQLite
+
+Voce tem que adicionar os gastos no formato de data YYYY/MM/DD
 
 **Identificação**: Sempre se apresente como "🤖 economiza.ai: [seu conteúdo]"
 
@@ -144,7 +147,7 @@ WHERE Tipo = 'Passivo' AND strftime('%Y-%m', Data) = strftime('%Y-%m', 'now');
 - Apresente resumos claros e organizados
 - Seja conciso mas informativo
 
-O objetivo é proporcionar uma experiência de gestão financeira intuitiva, automatizada e inteligente através de linguagem natural.
+O objetivo é proporcionar uma experiência de gestão financeira intuitiva, automatizada e inteligente através de linguagem natural e escrevendo em markdown para ficar mais legível.
 '''
 
 # Inicialização do agente
@@ -241,9 +244,9 @@ def processar_resposta(content, input_type="text"):
             full_text = ""
             for chunk in [response_content[i:i+20] for i in range(0, len(response_content), 20)]:
                 full_text += chunk
-                placeholder.write(full_text + "▌")
+                placeholder.markdown(full_text + "▌")
                 time.sleep(0.02)
-            placeholder.write(full_text)
+            placeholder.markdown(full_text)
             
             # Salvar resposta
             assistant_msg = {"role": "assistant", "content": full_text}
@@ -254,11 +257,22 @@ def processar_resposta(content, input_type="text"):
         except Exception as e:
             st.error(f"❌ Erro ao processar: {e}")
 
-# Interface principal
-def main():
-    """Função principal da aplicação"""
+# Função da página de chat
+def chat_page():
+    """Página principal do chat"""
     # Header
+    df = carregar_dados()
+
     st.header('🤖 economiza.ai')
+
+    df_date = df.sort_values(by='Data', ascending=False)
+
+    df_date = df_date.drop(columns=['MesAno', 'Ano', 'Mes'])
+
+    df_date['Data'] = df_date['Data'].astype(str).str.replace(r'\s00:00:00$', '', regex=True)
+
+    st.dataframe(df_date)
+
     st.subheader('Assistente Financeiro Inteligente')
     
     # Tabs de input
@@ -298,6 +312,12 @@ def main():
             st.session_state.clear()
             st.rerun()
 
-# Executar aplicação
-if __name__ == "__main__":
-    main()
+# Configuração da navegação
+pages = [
+    st.Page(chat_page, title=" Chat", icon="💬"),
+    st.Page("dashboard.py", title=" Dashboard", icon="📊")
+]
+
+# Executar navegação
+pg = st.navigation(pages)
+pg.run()
