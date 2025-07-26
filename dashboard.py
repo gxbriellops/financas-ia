@@ -17,7 +17,9 @@ CORES = {
     'gasto': '#DC143C',    # Vermelho para gastos
     'saldo_positivo': '#228B22',  # Verde para saldo positivo
     'saldo_negativo': '#B22222',  # Vermelho escuro para saldo negativo
-    'neutral': '#708090'   # Cinza para elementos neutros
+    'neutral': '#708090',  # Cinza para elementos neutros
+    'gradient_verde': ['#90EE90', '#228B22', '#006400'],  # Gradiente verde
+    'gradient_vermelho': ['#FFA07A', '#DC143C', "#070404"]  # Gradiente vermelho
 }
 
 def carregar_dados():
@@ -37,52 +39,98 @@ def carregar_dados():
         st.error(f"Erro ao carregar dados: {e}")
         return pd.DataFrame()
 
-def criar_metricas(df):
-    """Cria métricas principais"""
+def criar_metricas_e_termometro(df):
+    """Cria métricas principais e termômetro financeiro"""
     if df.empty:
         st.warning("📊 Nenhum dado encontrado. Adicione algumas transações no chat primeiro!")
         return
     
-    # Calcular totais
-    receitas = df[df['Tipo'] == 'Ativo']['Valor'].sum()
-    gastos = df[df['Tipo'] == 'Passivo']['Valor'].sum()
-    saldo = receitas - gastos
+    # Calcular médias mensais
+    meses_com_dados = df['MesAno'].nunique()
+    media_receitas = df[df['Tipo'] == 'Ativo']['Valor'].sum() / max(meses_com_dados, 1)
+    media_gastos = df[df['Tipo'] == 'Passivo']['Valor'].sum() / max(meses_com_dados, 1)
     
-    # Métricas do mês atual
-    mes_atual = datetime.now().strftime('%Y-%m')
-    df_mes = df[df['MesAno'] == mes_atual]
-    receitas_mes = df_mes[df_mes['Tipo'] == 'Ativo']['Valor'].sum()
-    gastos_mes = df_mes[df_mes['Tipo'] == 'Passivo']['Valor'].sum()
-    saldo_mes = receitas_mes - gastos_mes
+    # Saldo atual total
+    receitas_total = df[df['Tipo'] == 'Ativo']['Valor'].sum()
+    gastos_total = df[df['Tipo'] == 'Passivo']['Valor'].sum()
+    saldo_atual = receitas_total - gastos_total
     
-    # Exibir métricas
-    col1, col2, col3 = st.columns(3)
+    # Meses de cobertura
+    meses_cobertura = saldo_atual / media_gastos if media_gastos > 0 else float('inf')
+    
+    # Layout principal
+    col1, col3 = st.columns([1, 2])
     
     with col1:
         st.metric(
-            "💰 Receitas Totais", 
-            f"R$ {receitas:,.2f}",
-            f"R$ {receitas_mes:,.2f} este mês"
-        )
-    
-    with col2:
-        st.metric(
-            "💸 Gastos Totais", 
-            f"R$ {gastos:,.2f}",
-            f"R$ {gastos_mes:,.2f} este mês"
-        )
-    
-    with col3:
-        cor_saldo = CORES['saldo_positivo'] if saldo >= 0 else CORES['saldo_negativo']
-        st.metric(
-            "📊 Saldo", 
-            f"R$ {saldo:,.2f}",
-            f"R$ {saldo_mes:,.2f} este mês"
+            "💰 Média Mensal de Receitas", 
+            f"R$ {media_receitas:,.2f}",
+            delta=f"Baseado em {meses_com_dados} meses"
         )
 
-def criar_grafico_barra(df):
-    """Gráfico de barra - Distribuição de gastos por categoria"""
-    st.subheader("📊 Onde Você Gasta Mais?")
+        st.subheader(' ')
+        st.subheader(' ')
+
+        st.metric(
+            "💸 Média Mensal de Gastos", 
+            f"R$ {media_gastos:,.2f}",
+            delta=f"Saldo atual: R$ {saldo_atual:,.2f}"
+        )
+    
+    # with col2:
+    
+    with col3:
+        # Termômetro financeiro
+        st.markdown("### 🌡️ Termômetro Financeiro")
+        
+        if meses_cobertura == float('inf'):
+            st.success("✨ Sem gastos registrados!")
+        else:
+            # Criar gauge/termômetro
+            fig = go.Figure(go.Indicator(
+                mode = "gauge+number+delta",
+                value = min(meses_cobertura, 12),  # Limitar visualização a 12 meses
+                domain = {'x': [0, 1], 'y': [0, 1]},
+                title = {'text': "Meses de Cobertura", 'font': {'size': 14}},
+                delta = {'reference': 3, 'increasing': {'color': "green"}},
+                gauge = {
+                    'axis': {'range': [None, 12], 'tickwidth': 1, 'tickcolor': "darkblue"},
+                    'bar': {'color': CORES['saldo_positivo'] if meses_cobertura >= 3 else CORES['saldo_negativo']},
+                    'bgcolor': "white",
+                    'borderwidth': 2,
+                    'bordercolor': "gray",
+                    'steps': [
+                        {'range': [0, 3], 'color': '#ffcccb'},
+                        {'range': [3, 6], 'color': '#ffffcc'},
+                        {'range': [6, 12], 'color': '#90EE90'}
+                    ],
+                    'threshold': {
+                        'line': {'color': "red", 'width': 4},
+                        'thickness': 0.75,
+                        'value': 3
+                    }
+                }
+            ))
+            
+            fig.update_layout(
+                height=200,
+                margin=dict(l=20, r=20, t=40, b=0),
+                font={'size': 12}
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Interpretação
+            if meses_cobertura < 3:
+                st.warning(f"⚠️ Atenção: Saldo cobre apenas {meses_cobertura:.1f} meses")
+            elif meses_cobertura < 6:
+                st.info(f"📊 Saldo cobre {meses_cobertura:.1f} meses de gastos")
+            else:
+                st.success(f"✅ Excelente! Saldo cobre {meses_cobertura:.1f} meses")
+
+def criar_grafico_pizza(df):
+    """Gráfico de pizza - Distribuição de gastos por categoria"""
+    st.subheader("🎯 Distribuição de Gastos por Categoria")
     
     if df.empty:
         st.info("Nenhum dado disponível.")
@@ -93,198 +141,190 @@ def criar_grafico_barra(df):
     gastos_df = gastos_df.sort_values('Valor', ascending=False)
 
     if not gastos_df.empty:
-        fig = px.bar(
-            data_frame=gastos_df,
-            x='Categorias',
-            y='Valor',
-            text='Valor',
-            labels={'Valor': 'Total Gasto (R$)', 'Categorias': 'Categoria'}
+        fig = px.pie(
+            gastos_df, 
+            values='Valor', 
+            names='Categorias',
+            color_discrete_sequence=px.colors.qualitative.Set3
         )
-
+        
         fig.update_traces(
-            texttemplate='R$ %{y:,.2f}',
-            textposition='outside'
+            textposition='inside',
+            textinfo='percent+label',
+            hovertemplate='<b>%{label}</b><br>R$ %{value:,.2f}<br>%{percent}<extra></extra>'
         )
-
+        
         fig.update_layout(
             height=400,
-            font=dict(size=12),
-            xaxis_tickangle=-45,
-            yaxis_title=None,
-            xaxis_title=None,
-            margin=dict(t=20, b=40),
-            showlegend=False  # Remove a legenda para ficar mais limpo
+            font=dict(size=14),
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="middle",
+                y=0.5,
+                xanchor="left",
+                x=1.01
+            )
         )
-
+        
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Nenhum gasto registrado ainda.")
 
-
-def criar_grafico_linhas(df):
-    """Gráfico de linhas - Evolução temporal"""
-    st.subheader("📅 Como Seus Gastos e Receitas Evoluem?")
+def criar_grafico_evolucao(df):
+    """Gráfico combinado - Evolução e saldo mensal"""
+    st.subheader("📈 Evolução Financeira Mensal")
     
     if df.empty:
         return
     
-    # Agrupar por mês e tipo
-    df_mensal = df.groupby(['MesAno', 'Tipo'])['Valor'].sum().reset_index()
-    
-    if not df_mensal.empty:
-        # Pivotar para ter receitas e gastos como colunas
-        df_pivot = df_mensal.pivot(index='MesAno', columns='Tipo', values='Valor').fillna(0)
-        df_pivot = df_pivot.reset_index()
-        
-        fig = go.Figure()
-        
-        # Adicionar receitas
-        if 'Ativo' in df_pivot.columns:
-            fig.add_trace(go.Scatter(
-                x=df_pivot['MesAno'],
-                y=df_pivot['Ativo'],
-                mode='lines+markers',
-                name='Receitas',
-                line=dict(color=CORES['receita'], width=3),
-                marker=dict(size=8)
-            ))
-        
-        # Adicionar gastos
-        if 'Passivo' in df_pivot.columns:
-            fig.add_trace(go.Scatter(
-                x=df_pivot['MesAno'],
-                y=df_pivot['Passivo'],
-                mode='lines+markers',
-                name='Gastos',
-                line=dict(color=CORES['gasto'], width=3),
-                marker=dict(size=8)
-            ))
-        
-        fig.update_layout(
-            title="Evolução Mensal de Receitas e Gastos",
-            xaxis_title="Período",
-            yaxis_title="Valor (R$)",
-            hovermode='x unified',
-            height=400,
-            showlegend=True
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Dados insuficientes para mostrar evolução temporal.")
-
-def criar_grafico_barras(df):
-    """Gráfico de barras - Comparação mensal"""
-    st.subheader("📊 Saldo Mensal: Você Está no Azul ou no Vermelho?")
-    
-    if df.empty:
-        return
-    
-    # Calcular saldo mensal
+    # Preparar dados mensais
     df_mensal = df.groupby(['MesAno', 'Tipo'])['Valor'].sum().reset_index()
     df_pivot = df_mensal.pivot(index='MesAno', columns='Tipo', values='Valor').fillna(0)
     df_pivot['Saldo'] = df_pivot.get('Ativo', 0) - df_pivot.get('Passivo', 0)
     df_pivot = df_pivot.reset_index()
     
     if not df_pivot.empty:
-        # Definir cores baseadas no saldo
-        cores = [CORES['saldo_positivo'] if x >= 0 else CORES['saldo_negativo'] for x in df_pivot['Saldo']]
+        # Criar subplot com 2 gráficos
+        fig = make_subplots(
+            rows=2, cols=1,
+            row_heights=[0.7, 0.3],
+            shared_xaxes=True,
+            vertical_spacing=0.05,
+            subplot_titles=("Receitas vs Gastos", "Saldo Mensal")
+        )
         
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=df_pivot['MesAno'],
-            y=df_pivot['Saldo'],
-            marker_color=cores,
-            name='Saldo Mensal',
-            text=[f'R$ {x:,.0f}' for x in df_pivot['Saldo']],
-            textposition='outside'
-        ))
+        # Gráfico 1: Linhas de receitas e gastos
+        if 'Ativo' in df_pivot.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=df_pivot['MesAno'],
+                    y=df_pivot['Ativo'],
+                    mode='lines+markers',
+                    name='Receitas',
+                    line=dict(color=CORES['receita'], width=3),
+                    marker=dict(size=8),
+                    hovertemplate='<b>Receitas</b><br>%{x}<br>R$ %{y:,.2f}<extra></extra>'
+                ),
+                row=1, col=1
+            )
         
-        # Adicionar linha zero
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+        if 'Passivo' in df_pivot.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=df_pivot['MesAno'],
+                    y=df_pivot['Passivo'],
+                    mode='lines+markers',
+                    name='Gastos',
+                    line=dict(color=CORES['gasto'], width=3),
+                    marker=dict(size=8),
+                    hovertemplate='<b>Gastos</b><br>%{x}<br>R$ %{y:,.2f}<extra></extra>'
+                ),
+                row=1, col=1
+            )
+        
+        # Gráfico 2: Barras de saldo
+        cores_saldo = [CORES['saldo_positivo'] if x >= 0 else CORES['saldo_negativo'] for x in df_pivot['Saldo']]
+        
+        fig.add_trace(
+            go.Bar(
+                x=df_pivot['MesAno'],
+                y=df_pivot['Saldo'],
+                marker_color=cores_saldo,
+                name='Saldo',
+                text=[f'R$ {x:,.0f}' for x in df_pivot['Saldo']],
+                textposition='outside',
+                hovertemplate='<b>Saldo</b><br>%{x}<br>R$ %{y:,.2f}<extra></extra>'
+            ),
+            row=2, col=1
+        )
+        
+        # Adicionar linha zero no gráfico de saldo
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=2, col=1)
+        
+        # Atualizar layout
+        fig.update_xaxes(title_text="Período", row=2, col=1)
+        fig.update_yaxes(title_text="Valor (R$)", row=1, col=1)
+        fig.update_yaxes(title_text="Saldo (R$)", row=2, col=1)
         
         fig.update_layout(
-            title="Saldo Mensal (Receitas - Gastos)",
-            xaxis_title="Período",
-            yaxis_title="Saldo (R$)",
-            height=400,
-            showlegend=False
+            height=600,
+            showlegend=True,
+            hovermode='x unified'
         )
         
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Dados insuficientes para calcular saldo mensal.")
+        st.info("Dados insuficientes para mostrar evolução temporal.")
 
-def criar_insights(df):
-    """Seção de insights e alertas"""
+def criar_tabela_transacoes(df):
+    """Exibe tabela de transações recentes de forma mais elegante"""
+    st.subheader("📋 Transações Recentes")
+    
     if df.empty:
+        st.info("Nenhuma transação registrada.")
         return
     
-
-    st.subheader("💡 Insights Financeiros")
+    # Preparar dados
+    df_display = df.copy()
+    df_display['Data'] = pd.to_datetime(df_display['Data'], format='mixed').dt.strftime('%d/%m/%Y')
+    df_display['Valor_Formatado'] = df_display.apply(
+        lambda x: f"+ R$ {x['Valor']:,.2f}" if x['Tipo'] == 'Ativo' else f"- R$ {x['Valor']:,.2f}",
+        axis=1
+    )
     
-    # Calcular alguns insights
-    categoria_mais_gasta = df[df['Tipo'] == 'Passivo'].groupby('Categorias')['Valor'].sum().idxmax()
-    valor_mais_gasto = df[df['Tipo'] == 'Passivo'].groupby('Categorias')['Valor'].sum().max()
+    # Selecionar e renomear colunas
+    df_display = df_display[['Data', 'Descrição', 'Categorias', 'Valor_Formatado']]
+    df_display.columns = ['Data', 'Descrição', 'Categoria', 'Valor']
     
-    mes_atual = datetime.now().strftime('%Y-%m')
-    gastos_mes_atual = df[(df['MesAno'] == mes_atual) & (df['Tipo'] == 'Passivo')]['Valor'].sum()
-    
-    # Calcular média mensal de gastos
-    gastos_por_mes = df[df['Tipo'] == 'Passivo'].groupby('MesAno')['Valor'].sum()
-    media_mensal = gastos_por_mes.mean() if not gastos_por_mes.empty else 0
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.info(f"🎯 **Categoria que mais consome seu dinheiro:** {categoria_mais_gasta} (R$ {valor_mais_gasto:,.2f})")
-    
-    with col2:
-        if gastos_mes_atual > media_mensal * 1.2:
-            st.warning(f"⚠️ **Atenção:** Gastos deste mês estão 20% acima da média!")
-        else:
-            st.success(f"✅ **Parabéns:** Gastos controlados este mês!")
+    # Mostrar apenas as 10 últimas transações
+    st.dataframe(
+        df_display.head(10),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Data": st.column_config.TextColumn("📅 Data"),
+            "Descrição": st.column_config.TextColumn("📝 Descrição"),
+            "Categoria": st.column_config.TextColumn("🏷️ Categoria"),
+            "Valor": st.column_config.TextColumn("💵 Valor"),
+        }
+    )
 
 # Interface principal do dashboard
 def main():
     """Função principal do dashboard"""
+    
+    # Header
     st.title("📊 Dashboard Financeiro")
-    st.markdown("**Visualize sua saúde financeira de forma clara e objetiva**")
+    st.markdown("**Visualize e entenda sua saúde financeira**")
     
     # Carregar dados
     df = carregar_dados()
     
-    # Métricas principais
-    criar_metricas(df)
+    # Métricas e termômetro
+    criar_metricas_e_termometro(df)
     
     st.markdown("---")
     
-    # Layout de duas colunas para gráficos
-    col1, col2 = st.columns(2)
+    # Gráficos principais
+    col1, col2 = st.columns([1, 1.6])
     
     with col1:
-        criar_grafico_barra(df)
+        criar_grafico_pizza(df)
     
     with col2:
-        criar_grafico_linhas(df)
+        criar_grafico_evolucao(df)
     
-    # Gráfico de barras em largura total
-    criar_grafico_barras(df)
+    st.markdown("---")
     
-    # Insights
-    criar_insights(df)
+    # Tabela de transações
+    criar_tabela_transacoes(df)
     
     # Botão de atualização
-    if st.button("🔄 Atualizar Dashboard", key="refresh_dashboard"):
-        st.rerun()
-
-    df_date = df.sort_values(by='Data', ascending=False)
-
-    df_date = df_date.drop(columns=['MesAno', 'Ano', 'Mes'])
-
-    df_date['Data'] = df_date['Data'].astype(str).str.replace(r'\s00:00:00$', '', regex=True)
-
-    st.dataframe(df_date)
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("🔄 Atualizar Dashboard", key="refresh_dashboard", use_container_width=True):
+            st.rerun()
 
 if __name__ == "__main__":
     main()

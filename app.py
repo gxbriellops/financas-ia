@@ -204,7 +204,8 @@ def renderizar_mensagem(msg):
         
         # Query do assistente
         if msg["role"] == "assistant" and msg.get("query"):
-            st.caption(f"🔍 {msg['query']}")
+            with st.expander("🔍 Ver SQL executado"):
+                st.code(msg['query'], language='sql')
         
         # Conteúdo principal
         st.write(msg["content"])
@@ -230,7 +231,8 @@ def processar_resposta(content, input_type="text"):
             query = ""
             if hasattr(response, 'tools') and response.tools:
                 query = response.tools[0].tool_args.get('query', '')
-                st.caption(f"🔍 {query}")
+                with st.expander("🔍 Ver SQL executado"):
+                    st.code(query, language='sql')
             
             # Extrair conteúdo da resposta
             response_content = response.content if hasattr(response, 'content') else str(response)
@@ -261,61 +263,90 @@ def processar_resposta(content, input_type="text"):
 def chat_page():
     """Página principal do chat"""
     # Header
-    df = carregar_dados()
-
-    st.header('🤖 economiza.ai')
-
-    df_date = df.sort_values(by='Data', ascending=False)
-
-    df_date = df_date.drop(columns=['MesAno', 'Ano', 'Mes'])
-
-    df_date['Data'] = df_date['Data'].astype(str).str.replace(r'\s00:00:00$', '', regex=True)
-
-    st.dataframe(df_date)
-
-    st.subheader('Assistente Financeiro Inteligente')
+    st.title('🤖 economiza.ai')
+    st.caption('Seu assistente financeiro inteligente')
     
-    # Tabs de input
-    tab1, tab2 = st.tabs(["💬 Texto", "🎤 Áudio"])
+    # Container principal com duas colunas
+    col1, col2 = st.columns([2, 1])
     
-    # Tab de texto
-    with tab1:
-        if prompt := st.chat_input("Digite sua mensagem..."):
-            processar_resposta(prompt, "text")
-            st.rerun()
-    
-    # Tab de áudio
-    with tab2:
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            audio_data = st.audio_input("Gravar mensagem de voz")
-        with col2:
-            st.write(' ')
-            st.write(' ')
-            if st.button("📤 Enviar Áudio", key="send_audio", disabled=not audio_data):
-                if audio_data:
-                    # Processar áudio
-                    transcricao = processar_audio(audio_data)
-                    processar_resposta(transcricao, "audio")
-                    st.rerun()
-    
-    # Renderizar histórico de mensagens
-    for msg in st.session_state.messages:
-        renderizar_mensagem(msg)
-    
-    # Sidebar com métricas
-    with st.sidebar:
-        st.header("📊 Estatísticas")
-        st.metric("💬 Mensagens", len(st.session_state.messages))
+    with col1:
+        # Container de chat
+        chat_container = st.container()
         
-        if st.button("🗑️ Limpar Conversa"):
-            st.session_state.clear()
+        # Renderizar histórico de mensagens
+        with chat_container:
+            for msg in st.session_state.messages:
+                renderizar_mensagem(msg)
+        
+        # Área de input
+        st.markdown("---")
+        
+        # Tabs de input
+        tab1, tab2 = st.tabs(["💬 Texto", "🎤 Áudio"])
+        
+        # Tab de texto
+        with tab1:
+            if prompt := st.chat_input("Digite sua mensagem..."):
+                processar_resposta(prompt, "text")
+                st.rerun()
+        
+        # Tab de áudio
+        with tab2:
+            col_audio1, col_audio2 = st.columns([3, 1])
+            with col_audio1:
+                audio_data = st.audio_input("Gravar mensagem de voz")
+            with col_audio2:
+                st.write(' ')
+                st.write(' ')
+                if st.button("📤 Enviar", key="send_audio", disabled=not audio_data, use_container_width=True):
+                    if audio_data:
+                        transcricao = processar_audio(audio_data)
+                        processar_resposta(transcricao, "audio")
+                        st.rerun()
+    
+    with col2:
+        # Resumo de transações recentes
+        st.markdown("### 📋 Transações Recentes")
+        
+        df = carregar_dados()
+        if not df.empty:
+            # Preparar dados
+            df_recent = df.head(5).copy()
+            df_recent['Data'] = df_recent['Data'].astype(str).str.replace(r'\s00:00:00$', '', regex=True)
+            df_recent['Valor_Display'] = df_recent.apply(
+                lambda x: f"+R$ {x['Valor']:.0f}" if x['Tipo'] == 'Ativo' else f"-R$ {x['Valor']:.0f}",
+                axis=1
+            )
+            
+            # Exibir transações
+            for _, row in df_recent.iterrows():
+                tipo_icon = "💰" if row['Tipo'] == 'Ativo' else "💸"
+                cor = "green" if row['Tipo'] == 'Ativo' else "red"
+                
+                st.markdown(f"""
+                <div style="padding: 10px; margin: 5px 0; border-left: 3px solid {cor}; background-color: rgba(128,128,128,0.1);">
+                    <div style="font-size: 12px; color: gray;">{row['Data']}</div>
+                    <div>{tipo_icon} <strong>{row['Descrição']}</strong></div>
+                    <div style="color: {cor}; font-weight: bold;">{row['Valor_Display']}</div>
+                    <div style="font-size: 11px; color: gray;">{row['Categorias']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("Nenhuma transação ainda")
+        
+        # Botões de ação
+        st.markdown("---")
+        if st.button("🔄 Atualizar", key="refresh_chat", use_container_width=True):
+            st.rerun()
+        
+        if st.button("🗑️ Limpar Conversa", key="clear_chat", use_container_width=True):
+            st.session_state.messages = []
             st.rerun()
 
 # Configuração da navegação
 pages = [
-    st.Page(chat_page, title=" Chat", icon="💬"),
-    st.Page("dashboard.py", title=" Dashboard", icon="📊")
+    st.Page(chat_page, title="Chat", icon="💬"),
+    st.Page("dashboard.py", title="Dashboard", icon="📊")
 ]
 
 # Executar navegação
