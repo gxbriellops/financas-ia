@@ -3,47 +3,33 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sqlalchemy import create_engine
 from datetime import datetime, timedelta
 import calendar
 
-# Configuração
-DB_PATH = 'sqlite:///./gastos_receita.db'
-engine = create_engine(DB_PATH)
+# Importar módulos customizados
+from auth import require_auth, get_user_info
+from database import get_database_engine, carregar_dados, get_summary_stats, get_category_summary
+from config import get_app_config
 
-# Cores do tema (storytelling visual)
+# Configuração
+config = get_app_config()
+
+# Cores do tema
 CORES = {
-    'receita': '#2E8B57',  # Verde escuro para receitas
-    'gasto': '#DC143C',    # Vermelho para gastos
-    'saldo_positivo': '#228B22',  # Verde para saldo positivo
-    'saldo_negativo': '#B22222',  # Vermelho escuro para saldo negativo
-    'neutral': '#708090',  # Cinza para elementos neutros
-    'gradient_verde': ['#90EE90', '#228B22', '#006400'],  # Gradiente verde
-    'gradient_vermelho': ['#FFA07A', '#DC143C', "#070404"]  # Gradiente vermelho
+    'receita': '#2E8B57',
+    'gasto': '#DC143C',
+    'saldo_positivo': '#228B22',
+    'saldo_negativo': '#B22222',
+    'neutral': '#708090',
+    'gradient_verde': ['#90EE90', '#228B22', '#006400'],
+    'gradient_vermelho': ['#FFA07A', '#DC143C', "#070404"]
 }
 
-def carregar_dados():
-    """Carrega dados do banco SQLite"""
-    try:
-        query = """
-        SELECT Data, Descrição, Valor, Categorias, Tipo, 
-               strftime('%Y-%m', Data) as MesAno,
-               strftime('%Y', Data) as Ano,
-               strftime('%m', Data) as Mes
-        FROM receita_gastos 
-        ORDER BY Data DESC
-        """
-        df = pd.read_sql(query, engine)
-        return df
-    except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
-        return pd.DataFrame()
-
-def criar_metricas_e_termometro(df):
-    """Cria métricas principais e termômetro financeiro"""
+@st.cache_data(ttl=config['cache_ttl']['stats'])
+def calcular_metricas(df):
+    """Calcula métricas principais com cache"""
     if df.empty:
-        st.warning("📊 Nenhum dado encontrado. Adicione algumas transações no chat primeiro!")
-        return
+        return None
     
     # Calcular médias mensais
     meses_com_dados = df['MesAno'].nunique()
@@ -58,14 +44,34 @@ def criar_metricas_e_termometro(df):
     # Meses de cobertura
     meses_cobertura = saldo_atual / media_gastos if media_gastos > 0 else float('inf')
     
+    return {
+        'meses_com_dados': meses_com_dados,
+        'media_receitas': media_receitas,
+        'media_gastos': media_gastos,
+        'receitas_total': receitas_total,
+        'gastos_total': gastos_total,
+        'saldo_atual': saldo_atual,
+        'meses_cobertura': meses_cobertura
+    }
+
+def criar_metricas_e_termometro(df):
+    """Cria métricas principais e termômetro financeiro"""
+    if df.empty:
+        st.warning("📊 Nenhum dado encontrado. Adicione algumas transações no chat primeiro!")
+        return
+    
+    metricas = calcular_metricas(df)
+    if not metricas:
+        return
+    
     # Layout principal
     col1, col3 = st.columns([1, 2])
     
     with col1:
         st.metric(
             "💰 Média Mensal de Receitas", 
-            f"R$ {media_receitas:,.2f}",
-            delta=f"Baseado em {meses_com_dados} meses"
+            f"R$ {metricas['media_receitas']:,.2f}",
+            delta=f"Baseado em {metricas['meses_com_dados']} meses"
         )
 
         st.subheader(' ')
@@ -73,29 +79,27 @@ def criar_metricas_e_termometro(df):
 
         st.metric(
             "💸 Média Mensal de Gastos", 
-            f"R$ {media_gastos:,.2f}",
-            delta=f"Saldo atual: R$ {saldo_atual:,.2f}"
+            f"R$ {metricas['media_gastos']:,.2f}",
+            delta=f"Saldo atual: R$ {metricas['saldo_atual']:,.2f}"
         )
-    
-    # with col2:
     
     with col3:
         # Termômetro financeiro
         st.markdown("### 🌡️ Termômetro Financeiro")
         
-        if meses_cobertura == float('inf'):
+        if metricas['meses_cobertura'] == float('inf'):
             st.success("✨ Sem gastos registrados!")
         else:
             # Criar gauge/termômetro
             fig = go.Figure(go.Indicator(
                 mode = "gauge+number+delta",
-                value = min(meses_cobertura, 12),  # Limitar visualização a 12 meses
+                value = min(metricas['meses_cobertura'], 12),
                 domain = {'x': [0, 1], 'y': [0, 1]},
                 title = {'text': "Meses de Cobertura", 'font': {'size': 14}},
                 delta = {'reference': 3, 'increasing': {'color': "green"}},
                 gauge = {
                     'axis': {'range': [None, 12], 'tickwidth': 1, 'tickcolor': "darkblue"},
-                    'bar': {'color': CORES['saldo_positivo'] if meses_cobertura >= 3 else CORES['saldo_negativo']},
+                    'bar': {'color': CORES['saldo_positivo'] if metricas['meses_cobertura'] >= 3 else CORES['saldo_negativo']},
                     'bgcolor': "white",
                     'borderwidth': 2,
                     'bordercolor': "gray",
@@ -121,26 +125,29 @@ def criar_metricas_e_termometro(df):
             st.plotly_chart(fig, use_container_width=True)
             
             # Interpretação
-            if meses_cobertura < 3:
-                st.warning(f"⚠️ Atenção: Saldo cobre apenas {meses_cobertura:.1f} meses")
-            elif meses_cobertura < 6:
-                st.info(f"📊 Saldo cobre {meses_cobertura:.1f} meses de gastos")
+            if metricas['meses_cobertura'] < 3:
+                st.warning(f"⚠️ Atenção: Saldo cobre apenas {metricas['meses_cobertura']:.1f} meses")
+            elif metricas['meses_cobertura'] < 6:
+                st.info(f"📊 Saldo cobre {metricas['meses_cobertura']:.1f} meses de gastos")
             else:
-                st.success(f"✅ Excelente! Saldo cobre {meses_cobertura:.1f} meses")
+                st.success(f"✅ Excelente! Saldo cobre {metricas['meses_cobertura']:.1f} meses")
+
+@st.cache_data(ttl=config['cache_ttl']['stats'])
+def preparar_dados_pizza(df):
+    """Prepara dados para gráfico de pizza com cache"""
+    if df.empty:
+        return None
+    
+    gastos_df = df[df['Tipo'] == 'Passivo'].groupby('Categorias')['Valor'].sum().reset_index()
+    return gastos_df.sort_values('Valor', ascending=False)
 
 def criar_grafico_pizza(df):
     """Gráfico de pizza - Distribuição de gastos por categoria"""
     st.subheader("🎯 Distribuição de Gastos por Categoria")
     
-    if df.empty:
-        st.info("Nenhum dado disponível.")
-        return
-
-    # Filtrar apenas os gastos e agrupar por categoria
-    gastos_df = df[df['Tipo'] == 'Passivo'].groupby('Categorias')['Valor'].sum().reset_index()
-    gastos_df = gastos_df.sort_values('Valor', ascending=False)
-
-    if not gastos_df.empty:
+    gastos_df = preparar_dados_pizza(df)
+    
+    if gastos_df is not None and not gastos_df.empty:
         fig = px.pie(
             gastos_df, 
             values='Valor', 
@@ -171,20 +178,24 @@ def criar_grafico_pizza(df):
     else:
         st.info("Nenhum gasto registrado ainda.")
 
+@st.cache_data(ttl=config['cache_ttl']['stats'])
+def preparar_dados_evolucao(df):
+    """Prepara dados para gráfico de evolução com cache"""
+    if df.empty:
+        return None
+    
+    df_mensal = df.groupby(['MesAno', 'Tipo'])['Valor'].sum().reset_index()
+    df_pivot = df_mensal.pivot(index='MesAno', columns='Tipo', values='Valor').fillna(0)
+    df_pivot['Saldo'] = df_pivot.get('Ativo', 0) - df_pivot.get('Passivo', 0)
+    return df_pivot.reset_index()
+
 def criar_grafico_evolucao(df):
     """Gráfico combinado - Evolução e saldo mensal"""
     st.subheader("📈 Evolução Financeira Mensal")
     
-    if df.empty:
-        return
+    df_pivot = preparar_dados_evolucao(df)
     
-    # Preparar dados mensais
-    df_mensal = df.groupby(['MesAno', 'Tipo'])['Valor'].sum().reset_index()
-    df_pivot = df_mensal.pivot(index='MesAno', columns='Tipo', values='Valor').fillna(0)
-    df_pivot['Saldo'] = df_pivot.get('Ativo', 0) - df_pivot.get('Passivo', 0)
-    df_pivot = df_pivot.reset_index()
-    
-    if not df_pivot.empty:
+    if df_pivot is not None and not df_pivot.empty:
         # Criar subplot com 2 gráficos
         fig = make_subplots(
             rows=2, cols=1,
@@ -239,7 +250,7 @@ def criar_grafico_evolucao(df):
             row=2, col=1
         )
         
-        # Adicionar linha zero no gráfico de saldo
+        # Adicionar linha zero
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=2, col=1)
         
         # Atualizar layout
@@ -258,7 +269,7 @@ def criar_grafico_evolucao(df):
         st.info("Dados insuficientes para mostrar evolução temporal.")
 
 def criar_tabela_transacoes(df):
-    """Exibe tabela de transações recentes de forma mais elegante"""
+    """Exibe tabela de transações recentes"""
     st.subheader("📋 Transações Recentes")
     
     if df.empty:
@@ -291,15 +302,25 @@ def criar_tabela_transacoes(df):
     )
 
 # Interface principal do dashboard
+@require_auth
 def main():
-    """Função principal do dashboard"""
+    """Função principal do dashboard com autenticação"""
     
-    # Header
-    st.title("📊 Dashboard Financeiro")
-    st.markdown("**Visualize e entenda sua saúde financeira**")
+    # Header com informações do usuário
+    col_header1, col_header2 = st.columns([3, 1])
+    
+    with col_header1:
+        st.title("📊 Dashboard Financeiro")
+        st.markdown("**Visualize e entenda sua saúde financeira**")
+    
+    with col_header2:
+        user_info = get_user_info()
+        st.markdown(f"👤 **{user_info['username']}**")
+        st.caption(f"Sessão: {int(user_info['session_duration'] // 60)} min")
     
     # Carregar dados
-    df = carregar_dados()
+    engine = get_database_engine()
+    df = carregar_dados(engine)
     
     # Métricas e termômetro
     criar_metricas_e_termometro(df)
@@ -324,6 +345,8 @@ def main():
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         if st.button("🔄 Atualizar Dashboard", key="refresh_dashboard", use_container_width=True):
+            # Limpar cache específico do dashboard
+            st.cache_data.clear()
             st.rerun()
 
 if __name__ == "__main__":

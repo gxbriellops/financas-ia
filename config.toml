@@ -1,0 +1,41 @@
+# Configurações do Streamlit
+# Este arquivo PODE ser commitado no Git
+
+[theme]
+# Tema escuro moderno
+primaryColor = "#2E8B57"           # Verde para elementos principais
+backgroundColor = "#0E1117"        # Fundo escuro
+secondaryBackgroundColor = "#1E2329" # Fundo secundário
+textColor = "#FAFAFA"              # Texto claro
+
+# Fonte
+font = "sans serif"
+
+[server]
+# Configurações do servidor
+headless = true
+maxUploadSize = 10                 # MB
+
+# Performance
+enableStaticServing = true
+
+[browser]
+# Configurações do navegador
+gatherUsageStats = false
+serverAddress = "0.0.0.0"
+
+[runner]
+# Configurações de execução
+magicEnabled = true
+
+# IMPORTANTE: Para produção
+enforceSerializableSessionState = false
+
+[client]
+# Configurações do cliente
+showErrorDetails = false
+toolbarMode = "minimal"
+
+[deprecation]
+# Suprimir avisos de depreciação em produção
+showPyplotGlobalUse = false
