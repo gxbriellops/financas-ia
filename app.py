@@ -1,170 +1,52 @@
 from agno.agent import Agent, RunResponse
 from agno.models.google import Gemini
 from agno.tools.sql import SQLTools
-from sqlalchemy import create_engine
-from dotenv import load_dotenv
 from datetime import datetime
 import streamlit as st
 import time
-import os
-from helpers import speetch_to_text
 import json
 import re
-from dashboard import carregar_dados
+
+# Importar módulos customizados
+from auth import check_auth, login_page, logout, get_user_info
+from database import get_database_engine, carregar_dados, invalidate_cache
+from config import get_api_keys, get_app_config, get_system_instructions
+from helpers import speetch_to_text, extract_text_from_transcription
 
 # Configuração inicial
-load_dotenv()
-data_atual = datetime.now().date()
+config = get_app_config()
 
-# Constantes
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-DB_PATH = 'sqlite:///./gastos_receita.db'
-
-# Instruções do sistema
-SYSTEM_INSTRUCTIONS = f'''
-# System Message - Assistente Financeiro SQLite
-
-Voce tem que adicionar os gastos no formato de data YYYY/MM/DD
-
-**Identificação**: Sempre se apresente como "🤖 economiza.ai: [seu conteúdo]"
-
-Você é um assistente financeiro especializado em SQLite que gerencia automaticamente a tabela `receita_gastos` através de linguagem natural, executando operações de forma inteligente e proativa.
-
-## Estrutura da Tabela: `receita_gastos`
-
-|Campo|Tipo|Descrição|
-|---|---|---|
-|Data|DATE|Data da transação (padrão: data atual)|
-|Descrição|TEXT|Descrição clara da transação|
-|Valor|REAL|Valor monetário (sempre positivo)|
-|Categorias|TEXT|Categoria predefinida|
-|Tipo|TEXT|"Ativo" (receita) ou "Passivo" (gasto)|
-
-## Categorias Predefinidas
-
-- **Alimentação**: Restaurantes, supermercado, delivery, lanches, mercado
-- **Transporte**: Gasolina, Uber, ônibus, estacionamento, manutenção
-- **Saúde**: Consultas, remédios, farmácia, psicólogo, autocuidado
-- **Casa**: Internet, contas, ração pet, limpeza, móveis, utilidades
-- **Compras**: Roupas, eletrônicos, barbeador, celular, acessórios
-- **Entretenimento**: Streaming, cinema, jogos, Netflix, Spotify
-- **Educação**: Livros, cursos, mensalidades, materiais
-- **Receita**: Salários, diárias, vendas, rendimentos
-
-## Inteligência Preditiva
-
-### Processamento Automático
-
-Execute operações imediatamente sem solicitar confirmações desnecessárias. Inferir informações baseado no contexto:
-
-**Padrões de Entrada → Classificação Automática:**
-
-```
-"Gastei 20 reais com ração" → Data: {data_atual}, Descrição: "Ração", Valor: 20, Categoria: "Casa", Tipo: "Passivo"
-
-"Comprei barbeador por 84" → Data: {data_atual}, Descrição: "Barbeador", Valor: 84, Categoria: "Compras", Tipo: "Passivo"
-
-"Recebi 1500 de diárias" → Data: {data_atual}, Descrição: "Diárias", Valor: 1500, Categoria: "Receita", Tipo: "Ativo"
-
-"Paguei 120 na consulta" → Data: {data_atual}, Descrição: "Consulta médica", Valor: 120, Categoria: "Saúde", Tipo: "Passivo"
-```
-
-### Detecção de Contexto
-
-**Indicadores de Tipo:**
-
-- **Passivo**: "gastei", "comprei", "paguei", "despesa"
-- **Ativo**: "recebi", "salário", "diárias", "venda", "ganho"
-
-**Classificação por Palavra-chave:**
-
-- Identifique automaticamente a categoria através de termos relacionados
-- Use sempre a data atual para novos registros
-- Converta valores textuais para numérico (ex: "84 reais" → 84.0)
-
-## Operações Automáticas
-
-### Execução Imediata Para:
-
-1. **Inserção**: Detectar menções de gastos/receitas e adicionar automaticamente
-2. **Consulta**: Responder perguntas sobre gastos, totais, períodos
-3. **Análise**: Calcular somas, médias, comparações por categoria/período
-4. **Edição**: Corrigir registros quando solicitado
-5. **Exclusão**: Remover transações específicas
-
-### Filtros Inteligentes:
-
-- **Temporal**: "este mês", "semana passada", "últimos 30 dias"
-- **Categoria**: "gastos com alimentação", "receitas do trabalho"
-- **Valor**: "gastos acima de 100", "menores despesas"
-
-## Comunicação e Resposta
-
-### Formato de Resposta:
-
-- **Confirmação**: "Gasto registrado: [descrição] - R$ [valor] ([categoria])"
-- **Análise**: Apresente dados em formato claro com totais e percentuais
-- **Sugestões**: Ofereça insights sobre padrões de gastos quando relevante
-
-### Exemplos de Interação:
-
-**Usuário**: "Comprei um livro por 50 reais" **SQL Executado**:
-
-```sql
-INSERT INTO receita_gastos (Data, Descrição, Valor, Categorias, Tipo) 
-VALUES (DATE('now'), 'Livro', 50.0, 'Educação', 'Passivo');
-```
-
-**Resposta**: "🤖 economiza.ai: Gasto registrado com sucesso! Livro - R$ 50,00 (Educação)"
-
-**Usuário**: "Quanto gastei este mês?" **SQL Executado**:
-
-```sql
-SELECT SUM(Valor) as Total FROM receita_gastos 
-WHERE Tipo = 'Passivo' AND strftime('%Y-%m', Data) = strftime('%Y-%m', 'now');
-```
-
-## Diretrizes Operacionais
-
-### Seja Proativo:
-
-- Execute ações imediatamente quando o contexto for claro
-- Não peça confirmações para operações básicas de inserção
-- Sugira análises relevantes após inserções
-- Ofereça insights sobre padrões financeiros
-
-### Mantenha Precisão:
-
-- Valide valores numéricos
-- Garanta classificação correta de categorias
-- Use sempre data atual para novos registros
-- Mantenha consistência na nomenclatura
-
-### Comunicação Natural:
-
-- Use linguagem conversacional e amigável
-- Formate números monetários adequadamente (R$ X,XX)
-- Apresente resumos claros e organizados
-- Seja conciso mas informativo
-
-O objetivo é proporcionar uma experiência de gestão financeira intuitiva, automatizada e inteligente através de linguagem natural e escrevendo em markdown para ficar mais legível.
-'''
-
-# Inicialização do agente
-engine = create_engine(DB_PATH)
-agente = Agent(
-    model=Gemini(id='gemini-2.0-flash-001', api_key=GEMINI_API_KEY),
-    add_history_to_messages=True,
-    markdown=False,
-    show_tool_calls=True,
-    retries=3,
-    system_message=SYSTEM_INSTRUCTIONS,
-    tools=[SQLTools(db_engine=engine)],
-    store_events=True
-)
+# Cache do agente AI
+@st.cache_resource
+def get_ai_agent():
+    """Inicializa e retorna o agente AI com cache"""
+    api_keys = get_api_keys()
+    engine = get_database_engine()
+    
+    agente = Agent(
+        model=Gemini(id='gemini-2.0-flash-001', api_key=api_keys['GEMINI_API_KEY']),
+        add_history_to_messages=True,
+        markdown=False,
+        show_tool_calls=True,
+        retries=3,
+        system_message=get_system_instructions(),
+        tools=[SQLTools(db_engine=engine)],
+        store_events=True
+    )
+    return agente
 
 # Configuração do Streamlit
-st.set_page_config(page_icon='🤖', page_title='economiza.ai', layout="wide")
+st.set_page_config(
+    page_icon=config['app_icon'], 
+    page_title=config['app_name'], 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Verificar autenticação
+if not check_auth():
+    login_page()
+    st.stop()
 
 # Inicializar estado da sessão
 if "messages" not in st.session_state:
@@ -175,20 +57,7 @@ def processar_audio(audio_file):
     """Processa áudio e retorna transcrição"""
     try:
         audio_transcrito = speetch_to_text(audio=audio_file)
-        transcricao_dict = json.loads(audio_transcrito)
-        
-        # Extrair texto usando regex
-        match = re.search(r'text=[\'"]([^\'"]+)[\'"]', str(transcricao_dict))
-        texto_extraido = match.group(1) if match else None
-        
-        if texto_extraido:
-            return texto_extraido
-        else:
-            # Tentar extrair diretamente do dict
-            if isinstance(transcricao_dict, dict) and 'text' in transcricao_dict:
-                return transcricao_dict['text']
-            return 'Não foi possível transcrever o áudio'
-    
+        return extract_text_from_transcription(audio_transcrito)
     except Exception as e:
         st.error(f"Erro ao processar áudio: {e}")
         return "Erro na transcrição do áudio"
@@ -224,7 +93,10 @@ def processar_resposta(content, input_type="text"):
     # Gerar resposta do assistente
     with st.chat_message("assistant"):
         try:
-            # Obter resposta do agente
+            # Obter agente
+            agente = get_ai_agent()
+            
+            # Obter resposta
             response = agente.run(content)
             
             # Extrair query SQL se houver
@@ -233,6 +105,10 @@ def processar_resposta(content, input_type="text"):
                 query = response.tools[0].tool_args.get('query', '')
                 with st.expander("🔍 Ver SQL executado"):
                     st.code(query, language='sql')
+                
+                # Invalidar cache se for operação de escrita
+                if any(cmd in query.upper() for cmd in ['INSERT', 'UPDATE', 'DELETE']):
+                    invalidate_cache()
             
             # Extrair conteúdo da resposta
             response_content = response.content if hasattr(response, 'content') else str(response)
@@ -262,18 +138,53 @@ def processar_resposta(content, input_type="text"):
 # Função da página de chat
 def chat_page():
     """Página principal do chat"""
-    # Header
-    st.title('🤖 economiza.ai')
-    st.caption('Seu assistente financeiro inteligente')
+    # Sidebar com informações do usuário
+    with st.sidebar:
+        st.markdown(f"### 👤 {get_user_info()['username']}")
+        st.caption(f"Logado há {int(get_user_info()['session_duration'] // 60)} minutos")
+        
+        if st.button("🚪 Sair", use_container_width=True):
+            logout()
+        
+        st.markdown("---")
+        
+        # Resumo financeiro
+        st.markdown("### 💰 Resumo Financeiro")
+        
+        engine = get_database_engine()
+        df = carregar_dados(engine)
+        
+        if not df.empty:
+            receitas = df[df['Tipo'] == 'Ativo']['Valor'].sum()
+            gastos = df[df['Tipo'] == 'Passivo']['Valor'].sum()
+            saldo = receitas - gastos
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Receitas", f"R$ {receitas:,.0f}")
+            with col2:
+                st.metric("Gastos", f"R$ {gastos:,.0f}")
+            
+            st.metric(
+                "Saldo", 
+                f"R$ {saldo:,.0f}",
+                delta=f"{(saldo/gastos*100):.0f}%" if gastos > 0 else "∞"
+            )
+        else:
+            st.info("Nenhuma transação ainda")
     
-    # Container principal com duas colunas
+    # Header principal
+    st.title(f'{config["app_icon"]} {config["app_name"]}')
+    st.caption('Seu assistente financeiro inteligente com IA')
+    
+    # Container principal
     col1, col2 = st.columns([2, 1])
     
     with col1:
         # Container de chat
         chat_container = st.container()
         
-        # Renderizar histórico de mensagens
+        # Renderizar histórico
         with chat_container:
             for msg in st.session_state.messages:
                 renderizar_mensagem(msg)
@@ -284,13 +195,11 @@ def chat_page():
         # Tabs de input
         tab1, tab2 = st.tabs(["💬 Texto", "🎤 Áudio"])
         
-        # Tab de texto
         with tab1:
             if prompt := st.chat_input("Digite sua mensagem..."):
                 processar_resposta(prompt, "text")
                 st.rerun()
         
-        # Tab de áudio
         with tab2:
             col_audio1, col_audio2 = st.columns([3, 1])
             with col_audio1:
@@ -305,10 +214,12 @@ def chat_page():
                         st.rerun()
     
     with col2:
-        # Resumo de transações recentes
+        # Transações recentes
         st.markdown("### 📋 Transações Recentes")
         
-        df = carregar_dados()
+        engine = get_database_engine()
+        df = carregar_dados(engine)
+        
         if not df.empty:
             # Preparar dados
             df_recent = df.head(5).copy()
@@ -336,12 +247,18 @@ def chat_page():
         
         # Botões de ação
         st.markdown("---")
-        if st.button("🔄 Atualizar", key="refresh_chat", use_container_width=True):
-            st.rerun()
         
-        if st.button("🗑️ Limpar Conversa", key="clear_chat", use_container_width=True):
-            st.session_state.messages = []
-            st.rerun()
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            if st.button("🔄 Atualizar", key="refresh_chat", use_container_width=True):
+                invalidate_cache()
+                st.rerun()
+        
+        with col_btn2:
+            if st.button("🗑️ Limpar Chat", key="clear_chat", use_container_width=True):
+                st.session_state.messages = []
+                st.rerun()
 
 # Configuração da navegação
 pages = [

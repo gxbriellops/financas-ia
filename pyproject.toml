@@ -1,0 +1,14 @@
+[project]
+name = "economizaai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agno>=1.7.6",
+    "google-genai>=1.27.0",
+    "groq>=0.30.0",
+    "plotly>=6.2.0",
+    "sqlalchemy>=2.0.41",
+    "streamlit>=1.47.1",
+]
