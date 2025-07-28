@@ -7,10 +7,8 @@ O **economiza.ai** é um assistente financeiro pessoal que revoluciona a forma c
 Este sistema combina inteligência artificial avançada com visualizações financeiras intuitivas, permitindo que você:
 
 - **Converse naturalmente** sobre suas finanças: "Gastei 50 reais no supermercado" 
-- **Use sua voz** para registros rápidos através de transcrição de áudio
 - **Visualize sua saúde financeira** através de dashboards interativos
 - **Receba insights inteligentes** sobre seus padrões de gastos
-- **Mantenha seus dados seguros** com autenticação robusta
 
 ## Como Funciona a Mágica?
 
@@ -22,16 +20,11 @@ O coração do sistema é um agente de IA que usa o modelo **Gemini 2.0** do Goo
 - Distinguir entre receitas e despesas baseado no contexto
 - Executar consultas SQL automaticamente para buscar informações
 - Oferecer análises e sugestões baseadas nos seus dados
-
-### 2. Processamento de Áudio Inteligente
-
-Usando a API **Groq Whisper**, o sistema pode transcrever sua voz em tempo real. Isso significa que você pode literalmente falar com seu assistente financeiro: "Oi, recebi meu salário de 3000 reais hoje" e ele entenderá e registrará automaticamente.
-
-### 3. Banco de Dados Adaptável
+  
+### 2. Banco de Dados Adaptável
 
 O sistema usa uma arquitetura inteligente de banco de dados:
 - **Desenvolvimento local**: SQLite para simplicidade
-- **Produção**: PostgreSQL para robustez e escalabilidade
 - **Cache inteligente**: Otimização automática de consultas frequentes
 
 ## Arquitetura do Sistema
@@ -63,13 +56,6 @@ Antes de começar, você precisará obter credenciais para os serviços de IA:
 2. Faça login com sua conta Google
 3. Clique em "Create API Key"
 4. Copie e guarde a chave (ela começa com "AIza...")
-
-**Chave do Groq:**
-1. Acesse [Groq Console](https://console.groq.com)
-2. Crie uma conta gratuita
-3. Vá em "API Keys" no menu lateral
-4. Clique em "Create API Key"
-5. Copie e guarde a chave (ela começa com "gsk_...")
 
 ### Passo 2: Configuração com UV (Recomendado)
 
@@ -164,6 +150,7 @@ git push -u origin main
 
 5. **CRUCIAL - Advanced Settings:**
    - Clique em "Advanced settings"
+   - Deixe seu repositório privado, é interessante que você mantenha suas informações sensíveis privadas.
    - Na seção "Secrets", cole **todo** o conteúdo do seu arquivo `secrets.toml`:
 
 ```toml
@@ -236,13 +223,6 @@ O chat é onde a mágica acontece. Você pode falar naturalmente:
 - "Qual minha categoria de maior gasto?"
 - "Como está meu saldo atual?"
 
-### Entrada por Voz
-
-O botão de áudio permite registros ainda mais rápidos:
-1. Clique no ícone 🎤
-2. Fale naturalmente: "Gastei vinte reais com ração do cachorro"
-3. Clique em "Enviar"
-4. O sistema transcreve e processa automaticamente
 
 ### Dashboard Inteligente
 
@@ -307,11 +287,6 @@ Exemplos de providers populares:
 - Confirme se o repositório está público ou você tem acesso
 - Veja os logs do deploy no dashboard do Streamlit
 
-**Transcrição de Áudio Não Funciona:**
-- Verifique a chave do Groq
-- Teste com arquivos de áudio menores
-- Confirme se o microfone tem permissão no browser
-
 ### Logs e Debugging
 
 Para debugar problemas localmente:
@@ -328,6 +303,8 @@ tail -f ~/.streamlit/logs/streamlit.log
 
 Se você quiser contribuir ou personalizar ainda mais o sistema, a arquitetura modular facilita extensões:
 
+**Erro na função de aúdio**: Apesar de ter a função que suporta aúdio, ainda não consegui fazer ele funcionar certinho (desculpa)
+
 **Novos Processadores de Entrada:** Adicione suporte para importação de extratos bancários, fotos de notas fiscais, etc.
 
 **Visualizações Avançadas:** Crie novos tipos de gráficos e relatórios no `dashboard.py`.
@@ -339,3 +316,7 @@ Se você quiser contribuir ou personalizar ainda mais o sistema, a arquitetura m
 O economiza.ai representa uma nova era na gestão financeira pessoal, onde a tecnologia trabalha para simplificar sua vida ao invés de complicá-la. Ao combinar conversação natural, processamento inteligente e visualizações claras, ele transforma uma tarefa muitas vezes tediosa em uma experiência fluida e até mesmo prazerosa.
 
 Com este guia completo, você tem todas as ferramentas necessárias para não apenas instalar e usar o sistema, mas também compreender profundamente como ele funciona e como pode ser adaptado às suas necessidades específicas.
+
+Pretendo melhorar esse projeto continuamente e implementar novas features futuramente.
+
+Desenvolvido com 💗 por Gabriel.
