@@ -317,6 +317,6 @@ O economiza.ai representa uma nova era na gestão financeira pessoal, onde a tec
 
 Com este guia completo, você tem todas as ferramentas necessárias para não apenas instalar e usar o sistema, mas também compreender profundamente como ele funciona e como pode ser adaptado às suas necessidades específicas.
 
-Pretendo melhorar esse projeto continuamente e implementar novas features futuramente.
+**Pretendo melhorar esse projeto continuamente e implementar novas features futuramente.**
 
 Desenvolvido com 💗 por Gabriel.
